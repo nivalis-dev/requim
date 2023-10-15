@@ -1,126 +1,64 @@
-use std::collections::HashSet;
-use serde_derive::{Deserialize, Serialize};
-use toml::{de, ser};
+use derive_more::Display;
+use directories::ProjectDirs;
+use serde_derive::Deserialize;
+use std::error::Error;
+use std::path::PathBuf;
+use std::{fs, io};
+use toml::de;
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Deserialize)]
 pub struct Config {
-    pub projects: Vec<Project>,
+    pub data_dir: PathBuf,
+}
+
+#[derive(Debug, Display)]
+pub enum ConfigError {
+    #[display(fmt = "failed to read config ({})", _0)]
+    IOError(io::Error),
+    #[display(fmt = "failed to get config directory path")]
+    NoPath,
+    #[display(fmt = "failed to deserialize config ({})", _0)]
+    DeserializationError(de::Error),
+}
+
+impl Error for ConfigError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            ConfigError::DeserializationError(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<io::Error> for ConfigError {
+    fn from(err: io::Error) -> Self {
+        ConfigError::IOError(err)
+    }
+}
+
+impl From<de::Error> for ConfigError {
+    fn from(err: de::Error) -> Self {
+        ConfigError::DeserializationError(err)
+    }
 }
 
 impl Config {
-    pub fn new() -> Self {
-        Self{
-            projects: Vec::<Project>::new(),
-        }
-    }
+    pub fn read() -> Result<Self, ConfigError> {
+        let project_dirs =
+            ProjectDirs::from("se", "Nivalis", "RequiM").ok_or(ConfigError::NoPath)?;
+        let config_file_path = project_dirs.config_dir().join("Config.toml");
 
-    fn from_toml(document: &str) -> Result<Self, de::Error> {
-        let cfg: Self = de::from_str(document)?;
-
-        let mut seen_names = HashSet::<String>::new();
-
-        if let Some(duplicate_name) = cfg.projects.iter().fold(None, |acc, proj| {
-            if acc.is_some() {
-                acc
-            } else if seen_names.contains(&proj.name) {
-                Some(proj.name.clone())
-            } else {
-                seen_names.insert(proj.name.clone());
-                None
-            }
-        }) {
-            Err(de::Error::custom("Placeholder"))
+        if config_file_path.exists() {
+            let document = fs::read_to_string(config_file_path)?;
+            Ok(de::from_str(&document)?)
         } else {
-            Ok(cfg)
+            Ok(Self::default(&project_dirs))
         }
     }
 
-    fn as_toml(&self) -> Result<String, ser::Error> {
-        let document = ser::to_string_pretty(self)?;
-
-        Ok(document)
-    }
-
-    fn project_name_collision(&self, name: &str) -> Option<String> {
-        let name_lowercase = name.to_lowercase();
-
-        self.projects
-            .iter()
-            .find(|proj| proj.name.to_lowercase() == name_lowercase)
-            .map(|proj| proj.name.clone())
-    }
-}
-
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub struct Project {
-    pub name: String,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const MINIMAL_TOML: &str = "projects = []
-";
-
-    const POPULATED_TOML: &str = "[[projects]]
-name = \"Test Project 1\"
-
-[[projects]]
-name = \"Test Project 2\"
-";
-
-    const INVALID_PROJECT_NAMES_TOML: &str = "[[projects]]
-name = \"Test Project\"
-
-[[projects]]
-name = \"Test Project\"
-";
-
-    const MINIMAL_CONFIG: Config = Config {
-        projects: vec![],
-    };
-
-    #[test]
-    fn deserialize_minmal_config() {
-        let config = Config::from_toml(MINIMAL_TOML).expect("Deserialization failure");
-
-        assert_eq!(config, MINIMAL_CONFIG);
-    }
-
-    #[test]
-    fn serialize_minimal_config() {
-        let document = MINIMAL_CONFIG.as_toml().expect("Serialization failure");
-
-        assert_eq!(document, MINIMAL_TOML);
-    }
-
-    #[test]
-    fn deserialize_populated_config() {
-        let config = Config::from_toml(POPULATED_TOML).expect("Deserialization failure");
-
-        assert_eq!(config.projects, vec![
-            Project{ name: "Test Project 1".to_string() },
-            Project{ name: "Test Project 2".to_string() },
-        ])
-
-    }
-
-    #[test]
-    fn serialize_populated_config() {
-        let config = Config {
-            projects: vec![
-                Project{ name: "Test Project 1".to_string() },
-                Project{ name: "Test Project 2".to_string() },
-            ],
-        };
-        let document = config.as_toml().expect("Serialization failure");
-
-        assert_eq!(document, POPULATED_TOML);
-    }
-
-    #[test]
-    fn deserialize_invalid_project_names_fails() {
-        assert!(Config::from_toml(INVALID_PROJECT_NAMES_TOML).is_err());
+    fn default(project_dirs: &ProjectDirs) -> Self {
+        Self {
+            data_dir: project_dirs.data_local_dir().to_path_buf(),
+        }
     }
 }

@@ -12,7 +12,7 @@ pub struct NewArgs {
 
 pub fn run(subcommand: Subcommand) {
     match subcommand {
-        Subcommand::New(project_name) => create_project(project_name)
+        Subcommand::New(project_name) => create_project(project_name),
     };
 }
 

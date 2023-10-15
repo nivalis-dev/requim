@@ -4,8 +4,6 @@ pub struct AppState {
 
 impl AppState {
     pub fn init() -> Self {
-        AppState {
-            project: None,
-        }
+        AppState { project: None }
     }
 }
